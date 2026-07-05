@@ -88,7 +88,7 @@ def build_vit_dataloaders(train_images_path, train_images_label,
                           val_images_path, val_images_label,
                           batch_size, img_size=224,
                           mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5),
-                          num_workers=None):
+                          num_workers=None) -> Tuple[DataLoader, DataLoader]:
     """
     构建 ViT 训练/验证的 DataLoader。
 
@@ -101,7 +101,7 @@ def build_vit_dataloaders(train_images_path, train_images_label,
       - num_workers: DataLoader 多进程加载数据的 worker 数，None 则自动估算
 
     输出：
-      - train_loader, val_loader
+      - Tuple[DataLoader, DataLoader]: (train_loader, val_loader)
     """
 
     # 定义训练/验证的数据预处理与增强（torchvision.transforms）

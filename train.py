@@ -7,6 +7,8 @@ import torch
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 
+from typing import Dict, List, Optional
+
 
 from tools.my_dataset import build_vit_dataloaders
 from model import vit_model as vit_models
@@ -24,7 +26,15 @@ MODEL_SIGS = {
     "vit_huge_patch14_224_in21k":  {"patch_size": 14, "embed_dim": 1280, "depth": 32},
 }
 
-def _strip_module_prefix(state_dict):
+def _strip_module_prefix(state_dict) -> Dict:
+    """去除 DataParallel / DDP 保存的 "module." 前缀，返回干净的字段。
+
+    Args:
+        state_dict: 原始 state_dict（可能是 dict 或其它）
+
+    Returns:
+        Dict: 去除 "module." 前缀后的 state_dict；若非 dict 或无该前缀则原样返回
+    """
     # 兼容 DataParallel / DDP 保存的 "module.xxx"
     if not isinstance(state_dict, dict):
         return state_dict
@@ -36,10 +46,17 @@ def _strip_module_prefix(state_dict):
     return {k[len("module."):]: v for k, v in state_dict.items()}
 
 
-def _infer_vit_sig_from_weights(state_dict):
+def _infer_vit_sig_from_weights(state_dict) -> Dict[str, Optional[int]]:
     """
     从权重里尽量推断出：patch_size / embed_dim / depth
     用于当用户选错模型时给更友好的提示
+
+    Args:
+        state_dict: 权重参数字典
+
+    Returns:
+        Dict[str, Optional[int]]: 包含 patch_size / embed_dim / depth 三个键的字典；
+        若无法推断则对应值为 None
     """
     sig = {"patch_size": None, "embed_dim": None, "depth": None}
 
@@ -62,9 +79,15 @@ def _infer_vit_sig_from_weights(state_dict):
     return sig
 
 
-def _suggest_models_by_sig(sig):
+def _suggest_models_by_sig(sig) -> List[str]:
     """
     根据推断的 (patch_size, embed_dim, depth) 给出可能匹配的模型名
+
+    Args:
+        sig: 由 _infer_vit_sig_from_weights 得到的结构特征字典
+
+    Returns:
+        List[str]: 命中 MODEL_SIGS 的候选模型名列表；任一特征缺失则返回空列表
     """
     ps, ed, dp = sig.get("patch_size"), sig.get("embed_dim"), sig.get("depth")
     if ps is None or ed is None or dp is None:
@@ -77,7 +100,22 @@ def _suggest_models_by_sig(sig):
     return cands
 
 
-def _smart_load_weights(model, ckpt, args, device):
+def _smart_load_weights(model, ckpt, args, device) -> "torch.nn.Module":
+    """智能加载预训练权重：兼容纯 state_dict / checkpoint 两种格式，
+    自动剔除分类头、过滤 shape 不匹配的 key，并在匹配比例过低时报错给提示。
+
+    Args:
+        model: 待加载权重的模型
+        ckpt: torch.load 加载得到的对象（dict 或纯 state_dict）
+        args: 命令行参数（用于校验 model 名是否与权重一致）
+        device: 设备
+
+    Returns:
+        nn.Module: 加载好权重的 model
+
+    Raises:
+        RuntimeError: checkpoint 记录的 model 与当前不一致，或匹配比例 < MIN_KEEP_RATIO
+    """
     # 兼容两种格式：
     # 1) 纯 state_dict（直接就是参数字典）
     # 2) checkpoint（含 model_state/optimizer_state/...）
@@ -155,7 +193,20 @@ def _smart_load_weights(model, ckpt, args, device):
     return model
 
 
-def build_model_and_prepare(args, device, num_classes: int):
+def build_model_and_prepare(args, device, num_classes: int) -> "torch.nn.Module":
+    """构建 ViT 模型并完成迁移学习准备（加载预训练权重 + 可选冻结 backbone）。
+
+    Args:
+        args: 命令行参数（含 model/weights/freeze_layers 等字段）
+        device: 模型放置的设备
+        num_classes: 下游任务类别数 K，用于重塑分类头
+
+    Returns:
+        nn.Module: 构建并准备好的模型
+
+    Raises:
+        ValueError: 当 args.model 在 vit_models 中找不到对应工厂函数时
+    """
     create_model = getattr(vit_models, args.model, None)
     if create_model is None or not callable(create_model):
         # 给出可选项：只列出 vit_model 里“看起来像 ViT 工厂函数”的名字
@@ -184,7 +235,16 @@ def build_model_and_prepare(args, device, num_classes: int):
     return model
 
 
-def main(args):
+def main(args) -> None:
+    """训练主流程：数据划分 -> 构建 DataLoader -> 构建模型 -> 优化器/调度器 ->
+    按 epoch 训练并验证 -> 保存 last/best 权重 -> 绘制曲线与混淆矩阵。
+
+    Args:
+        args: 命令行解析得到的 Namespace 对象，包含 epochs/batch_size/lr/data_path 等字段
+
+    Returns:
+        None: 函数无返回值，结果写入 exp_folder（metrics.csv / 权重 / 曲线图等）
+    """
     # 设备选择：优先使用 args.device（例如 cuda:0），若无 GPU 则回退到 CPU
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 

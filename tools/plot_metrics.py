@@ -6,7 +6,12 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-def set_scientific_style():
+def set_scientific_style() -> None:
+    """设置 matplotlib 全局绘图样式（论文风格：网格、字体、线宽等）。
+
+    Returns:
+        None: 仅更新 plt.rcParams
+    """
     plt.rcParams.update({
         "figure.figsize": (6.4, 4.2),
         "figure.dpi": 120,
@@ -30,11 +35,23 @@ def set_scientific_style():
     })
 
 
-def plot_from_metrics_csv(metrics_csv: str, out_dir: str, smooth: int = 1):
+def plot_from_metrics_csv(metrics_csv: str, out_dir: str, smooth: int = 1) -> None:
     """
     读取 metrics.csv 并在 out_dir 下输出：
       - loss_curve.png / .pdf
       - acc_curve.png  / .pdf
+
+    Args:
+        metrics_csv: metrics.csv 文件路径
+        out_dir: 曲线图输出目录
+        smooth: 滑动平均窗口（当前未启用，保留参数）
+
+    Returns:
+        None: 结果直接保存为 png 文件
+
+    Raises:
+        FileNotFoundError: metrics_csv 不存在
+        ValueError: metrics.csv 缺少必要列
     """
     if not os.path.exists(metrics_csv):
         raise FileNotFoundError(f"metrics.csv not found: {metrics_csv}")
@@ -97,9 +114,21 @@ def plot_from_metrics_csv(metrics_csv: str, out_dir: str, smooth: int = 1):
     plt.close()
 
 
-def plot_val_prf_curves(metrics_csv: str, out_dir: str, filename: str = "val_prf_curve.png"):
+def plot_val_prf_curves(metrics_csv: str, out_dir: str, filename: str = "val_prf_curve.png") -> str:
     """
     读取 metrics.csv，绘制 val_p / val_r / val_f1 三条曲线（同一张图），保存到 out_dir。
+
+    Args:
+        metrics_csv: metrics.csv 文件路径
+        out_dir: 曲线图输出目录
+        filename: 输出文件名（默认 val_prf_curve.png）
+
+    Returns:
+        str: 保存的图片完整路径
+
+    Raises:
+        FileNotFoundError: metrics_csv 不存在
+        ValueError: metrics_csv 缺少必要列
     """
     if not os.path.exists(metrics_csv):
         raise FileNotFoundError(f"metrics.csv not found: {metrics_csv}")
@@ -138,7 +167,12 @@ def plot_val_prf_curves(metrics_csv: str, out_dir: str, filename: str = "val_prf
     plt.close()
     return save_path
 
-def set_cm_style():
+def set_cm_style() -> None:
+    """设置混淆矩阵绘图的 matplotlib 样式（无网格、合适字体大小等）。
+
+    Returns:
+        None: 仅更新 plt.rcParams
+    """
     plt.rcParams.update({
         "figure.figsize": (6.8, 5.6),
         "figure.dpi": 120,
@@ -154,9 +188,18 @@ def set_cm_style():
     })
 
 @torch.no_grad()
-def compute_confusion_matrix(model, data_loader, device, num_classes: int):
+def compute_confusion_matrix(model, data_loader, device, num_classes: int) -> np.ndarray:
     """
     计算混淆矩阵 cm[K,K]：行=真实，列=预测
+
+    Args:
+        model: 待评估模型
+        data_loader: 验证集 DataLoader
+        device: 评估设备
+        num_classes: 类别数 K
+
+    Returns:
+        np.ndarray: 形状 [K, K] 的整型混淆矩阵（已搬到 CPU 上）
     """
     model.eval()
     cm = torch.zeros((num_classes, num_classes), device=device, dtype=torch.int64)
@@ -181,11 +224,20 @@ def plot_confusion_matrix(
     normalize: bool = False,
     use_index_labels: bool = True,
     max_classes_show_values: int = 30
-):
+) -> str:
     """
-    normalize=True：按行归一化（看各类召回分布更直观）
-    use_index_labels=True：坐标轴用 0..K-1，避免类名太长
-    max_classes_show_values：类别数 > 该阈值时不在格子里写数值，避免糊图
+    绘制并保存混淆矩阵图。
+
+    Args:
+        cm: 混淆矩阵 [K, K]
+        class_names: 类别名列表（use_index_labels=False 时用作坐标轴刻度）
+        out_path: 图片输出路径
+        normalize: True 则按行归一化（看各类召回分布更直观）
+        use_index_labels: True 则坐标轴用 0..K-1，避免类名太长
+        max_classes_show_values: 类别数 > 该阈值时不在格子里写数值，避免糊图
+
+    Returns:
+        str: 保存的图片路径 out_path
     """
     set_cm_style()
     cm_show = cm.astype(np.float64)
@@ -229,7 +281,19 @@ def plot_confusion_matrix(
     return out_path
 
 
-def save_confusion_matrices(model, val_loader, device, num_classes: int, exp_folder: str):
+def save_confusion_matrices(model, val_loader, device, num_classes: int, exp_folder: str) -> str:
+    """计算验证集混淆矩阵并保存为图片到 exp_folder 下。
+
+    Args:
+        model: 待评估模型
+        val_loader: 验证集 DataLoader
+        device: 评估设备
+        num_classes: 类别数 K
+        exp_folder: 实验输出目录，混淆矩阵图保存在其下
+
+    Returns:
+        str: 保存的混淆矩阵图片路径
+    """
     cm = compute_confusion_matrix(model, val_loader, device, num_classes)
 
     raw_path = os.path.join(exp_folder, "confusion_matrix.png")

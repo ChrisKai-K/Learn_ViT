@@ -18,6 +18,17 @@ class ConsolePrinter:
                  w_epoch=7, w_loss=7, w_acc=7, w_size=4, w_prf=7,
                  c_train="\033[96m", c_val="\033[93m",
                  bold="\033[1m", reset="\033[0m"):
+        """初始化打印格式参数（列宽、分隔符、颜色等）。
+
+        Args:
+            sep: 列与列之间的分隔字符串
+            w_epoch/w_loss/w_acc/w_size/w_prf: 各列宽度
+            c_train/c_val: train/val 行的 ANSI 颜色码
+            bold/reset: 加粗 / 重置 ANSI 码
+
+        Returns:
+            None
+        """
         self.SEP = sep
         self.W_EPOCH = w_epoch
         self.W_LOSS = w_loss
@@ -31,11 +42,28 @@ class ConsolePrinter:
         self.RESET = reset
         self.BAR_FORMAT = "{desc} {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
 
-    def color(self, text, c):
+    def color(self, text, c) -> str:
+        """给文本套上颜色（加粗 + 颜色码 + 重置）。
+
+        Args:
+            text: 原始字符串
+            c: ANSI 颜色码
+
+        Returns:
+            str: 带颜色转义码的字符串
+        """
         return f"{self.BOLD}{c}{text}{self.RESET}"
 
     # ---------- Train ----------
-    def train_header(self, colored=True):
+    def train_header(self, colored=True) -> str:
+        """生成训练表头字符串（epoch / loss / Acc / Size）。
+
+        Args:
+            colored: 是否着色
+
+        Returns:
+            str: 训练表头
+        """
         s = (
             f"{'epoch':<{self.W_EPOCH}}{self.SEP}"
             f"{'loss':>{self.W_LOSS}}{self.SEP}"
@@ -44,7 +72,19 @@ class ConsolePrinter:
         )
         return self.color(s, self.C_TRAIN) if colored else s
 
-    def train_desc(self, epoch_idx, epochs, loss, acc, size):
+    def train_desc(self, epoch_idx, epochs, loss, acc, size) -> str:
+        """生成训练进度条描述行（当前 epoch/loss/acc/size 数值）。
+
+        Args:
+            epoch_idx: 当前 epoch（从 1 开始）
+            epochs: 总 epoch 数
+            loss: 当前累计平均 loss
+            acc: 当前累计平均准确率
+            size: 输入图像尺寸
+
+        Returns:
+            str: 训练描述行
+        """
         ep = f"{epoch_idx}/{epochs}"
         return (
             f"{ep:<{self.W_EPOCH}}{self.SEP}"
@@ -54,7 +94,16 @@ class ConsolePrinter:
         )
 
     # ---------- Val ----------
-    def val_header(self, colored=True, keep_size_placeholder=True):
+    def val_header(self, colored=True, keep_size_placeholder=True) -> str:
+        """生成验证表头字符串（loss / Acc / P / R / F1）。
+
+        Args:
+            colored: 是否着色
+            keep_size_placeholder: 是否保留 size 列占位，使 P/R/F1 与 train 对齐
+
+        Returns:
+            str: 验证表头
+        """
         # keep_size_placeholder=True：保留 size 占位，让 P/R/F1 与 train 的 size 列对齐
         if keep_size_placeholder:
             s = (
@@ -79,7 +128,18 @@ class ConsolePrinter:
 
         return self.color(s, self.C_VAL) if colored else s
 
-    def val_desc(self, loss, acc, p, r, f1, keep_size_placeholder=True):
+    def val_desc(self, loss, acc, p, r, f1, keep_size_placeholder=True) -> str:
+        """生成验证进度条描述行（loss/acc/P/R/F1 数值）。
+
+        Args:
+            loss: 当前累计平均 loss
+            acc: 当前累计平均准确率
+            p/r/f1: 宏平均 precision / recall / f1
+            keep_size_placeholder: 是否保留 size 列占位
+
+        Returns:
+            str: 验证描述行
+        """
         if keep_size_placeholder:
             return (
                 f"{'':<{self.W_EPOCH}}{self.SEP}"
@@ -223,7 +283,20 @@ def read_split_data(
 
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, epochs):
+def train_one_epoch(model, optimizer, data_loader, device, epoch, epochs) -> Tuple[float, float]:
+    """在训练集上训练一个 epoch。
+
+    Args:
+        model: 待训练的模型
+        optimizer: 优化器
+        data_loader: 训练集 DataLoader
+        device: 训练设备
+        epoch: 当前 epoch 索引（从 0 开始）
+        epochs: 总 epoch 数
+
+    Returns:
+        Tuple[float, float]: (该 epoch 的平均 loss, 平均准确率)
+    """
     printer = ConsolePrinter()
     model.train()
     loss_function = torch.nn.CrossEntropyLoss()
@@ -270,7 +343,17 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, epochs):
 
 
 
-def _macro_prf_from_cm(cm: torch.Tensor, eps: float = 1e-12):
+def _macro_prf_from_cm(cm: torch.Tensor, eps: float = 1e-12) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """从混淆矩阵计算宏平均 precision / recall / f1。
+
+    Args:
+        cm: 混淆矩阵 [K, K]，行为真实、列为预测
+        eps: 防除零的小常数
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: (macro_precision, macro_recall, macro_f1)
+        只对验证集中出现过的类（support>0）做宏平均
+    """
     tp = cm.diag().float()
     fp = cm.sum(0).float() - tp
     fn = cm.sum(1).float() - tp
@@ -289,7 +372,22 @@ def _macro_prf_from_cm(cm: torch.Tensor, eps: float = 1e-12):
 
 
 @torch.no_grad()
-def evaluate(model, data_loader, device, epoch, epochs, num_classes: int, indent_spaces: int = 16):
+def evaluate(model, data_loader, device, epoch, epochs, num_classes: int, indent_spaces: int = 16) -> Tuple[float, float, float, float, float]:
+    """在验证集上评估模型，返回 loss/acc 与宏平均 P/R/F1。
+
+    Args:
+        model: 待评估模型
+        data_loader: 验证集 DataLoader
+        device: 评估设备
+        epoch: 当前 epoch 索引
+        epochs: 总 epoch 数
+        num_classes: 类别数 K
+        indent_spaces: 进度条描述缩进空格数（保留参数）
+
+    Returns:
+        Tuple[float, float, float, float, float]:
+        (avg_loss, avg_acc, macro_precision, macro_recall, macro_f1)
+    """
     printer = ConsolePrinter()
     model.eval()
     loss_function = torch.nn.CrossEntropyLoss()

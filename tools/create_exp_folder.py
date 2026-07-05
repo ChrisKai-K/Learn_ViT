@@ -1,6 +1,14 @@
 import os
+from typing import Tuple
 
-def create_exp_folder():
+def create_exp_folder() -> Tuple[str, str]:
+    """创建训练实验目录 run/train/expN/ 与其中的 weights 子目录。
+
+    若 run/train/exp 已存在，则递增查找 exp1、exp2… 直到找到不存在的目录。
+
+    Returns:
+        Tuple[str, str]: (exp_folder, weights_folder) 两个目录的相对路径
+    """
     # Step 1: 创建run文件夹（如果不存在）
     if not os.path.exists("run"):
         os.mkdir("run")
@@ -30,7 +38,14 @@ def create_exp_folder():
         exp_num += 1  # 如果文件夹已存在，增加数字，继续查找下一个文件夹
 
 
-def create_val_exp_folder():
+def create_val_exp_folder() -> str:
+    """创建推理结果目录 run/predict/expN/。
+
+    若 run/predict/exp 已存在，则递增查找 exp1、exp2… 直到找到不存在的目录。
+
+    Returns:
+        str: 新建的 exp 目录相对路径
+    """
     run_dir = "run"
     os.makedirs(run_dir, exist_ok=True)
 

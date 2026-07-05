@@ -40,7 +40,15 @@ class PatchEmbed(nn.Module):
         # 可选的归一化层（有些实现会在 patch embedding 后加 LN/BN）
         self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
+        """前向传播：图像 -> patch token 序列。
+
+        Args:
+            x: 输入图像张量 [B, C, H, W]，例如 [B, 3, 224, 224]
+
+        Returns:
+            torch.Tensor: patch token 序列 [B, N, D]，例如 [B, 196, 768]
+        """
         # x: [B, C, H, W] 例如 [B,3,224,224]
         B, C, H, W = x.shape
 
@@ -84,7 +92,15 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop_ratio)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
+        """多头自注意力前向传播。
+
+        Args:
+            x: 输入 token 序列 [B, N, C]，N 为 token 数（含 cls），C 为 embedding 维度
+
+        Returns:
+            torch.Tensor: 注意力输出 [B, N, C]，形状与输入一致
+        """
         # x: [B, N, C]  N = patch数 + 1（cls），C = dim
         B, N, C = x.shape
 
@@ -139,7 +155,15 @@ class Mlp(nn.Module):
         # dropout：在 fc1 后和 fc2 后都会用一次
         self.drop = nn.Dropout(drop)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
+        """前馈网络前向传播，对每个 token 独立作用，不改变 token 数 N。
+
+        Args:
+            x: 输入张量 [B, N, C]
+
+        Returns:
+            torch.Tensor: 输出张量 [B, N, C]，维度与输入相同
+        """
         # x: [B, N, C]
         x = self.fc1(x)  # [B, N, C] -> [B, N, hidden]
         x = self.act(x)  # 非线性
@@ -182,7 +206,15 @@ class Block(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop_ratio)
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
+        """Pre-LN Transformer Block 前向传播。
+
+        Args:
+            x: 输入 token 序列 [B, N, D]
+
+        Returns:
+            torch.Tensor: 输出 token 序列 [B, N, D]，形状不变
+        """
         # x: [B, N, D]
         # ---- Attention 子层 ----
         # LN: [B,N,D] -> [B,N,D]
@@ -197,10 +229,16 @@ class Block(nn.Module):
         return x
 
 
-def _init_vit_weights(m):
+def _init_vit_weights(m) -> None:
     """
     ViT 权重初始化（根据层类型分别初始化）
     m: 传入的子模块（apply 会遍历模型里所有子模块）
+
+    Args:
+        m: 模型子模块
+
+    Returns:
+        None: 直接就地修改各层权重
     """
     # 1) 线性层 Linear：trunc_normal 初始化权重，bias 全 0
     #   - trunc_normal：截断正态分布，避免极端大值，Transformer 中很常用
@@ -280,7 +318,15 @@ class VisionTransformer(nn.Module):
         # 对其它层按自定义 _init_vit_weights 初始化
         self.apply(_init_vit_weights)
 
-    def forward_features(self, x):
+    def forward_features(self, x) -> torch.Tensor:
+        """提取图像特征（不含分类头）。
+
+        Args:
+            x: 输入图像 [B, C, H, W]
+
+        Returns:
+            torch.Tensor: cls token 经 pre_logits 后的特征 [B, representation_size]
+        """
         # [B, C, H, W] -> [B, N, D]
         x = self.patch_embed(x)
 
@@ -300,18 +346,32 @@ class VisionTransformer(nn.Module):
         # 取 cls
         return self.pre_logits(x[:, 0])
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
+        """完整前向传播：图像 -> 特征 -> 分类 logits。
+
+        Args:
+            x: 输入图像 [B, C, H, W]
+
+        Returns:
+            torch.Tensor: 分类 logits [B, num_classes]
+        """
         x = self.forward_features(x)
         x = self.head(x)
         return x
 
 
-def vit_base_patch16_224_in21k(num_classes: int = 21843):
+def vit_base_patch16_224_in21k(num_classes: int = 21843) -> VisionTransformer:
     """
     ViT-Base model (ViT-B/16) from original paper (https://arxiv.org/abs/2010.11929).
     ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
     weights ported from official Google JAX impl:
     https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_patch16_224_in21k-e5005f0a.pth
+
+    Args:
+        num_classes: 分类头输出类别数 K
+
+    Returns:
+        VisionTransformer: ViT-B/16 模型实例
     """
     model = VisionTransformer(img_size=224,
                               patch_size=16,
@@ -323,12 +383,18 @@ def vit_base_patch16_224_in21k(num_classes: int = 21843):
     return model
 
 
-def vit_base_patch32_224_in21k(num_classes: int = 21843):
+def vit_base_patch32_224_in21k(num_classes: int = 21843) -> VisionTransformer:
     """
     ViT-Base model (ViT-B/32) from original paper (https://arxiv.org/abs/2010.11929).
     ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
     weights ported from official Google JAX impl:
     https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_patch32_224_in21k-8db57226.pth
+
+    Args:
+        num_classes: 分类头输出类别数 K
+
+    Returns:
+        VisionTransformer: ViT-B/32 模型实例
     """
     model = VisionTransformer(img_size=224,
                               patch_size=32,
@@ -340,12 +406,18 @@ def vit_base_patch32_224_in21k(num_classes: int = 21843):
     return model
 
 
-def vit_large_patch16_224_in21k(num_classes: int = 21843):
+def vit_large_patch16_224_in21k(num_classes: int = 21843) -> VisionTransformer:
     """
     ViT-Large model (ViT-L/16) from original paper (https://arxiv.org/abs/2010.11929).
     ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
     weights ported from official Google JAX impl:
     https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_large_patch16_224_in21k-606da67d.pth
+
+    Args:
+        num_classes: 分类头输出类别数 K
+
+    Returns:
+        VisionTransformer: ViT-L/16 模型实例
     """
     model = VisionTransformer(img_size=224,
                               patch_size=16,
@@ -357,12 +429,18 @@ def vit_large_patch16_224_in21k(num_classes: int = 21843):
     return model
 
 
-def vit_large_patch32_224_in21k(num_classes: int = 21843):
+def vit_large_patch32_224_in21k(num_classes: int = 21843) -> VisionTransformer:
     """
     ViT-Large model (ViT-L/32) from original paper (https://arxiv.org/abs/2010.11929).
     ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
     weights ported from official Google JAX impl:
     https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_large_patch32_224_in21k-9046d2e7.pth
+
+    Args:
+        num_classes: 分类头输出类别数 K
+
+    Returns:
+        VisionTransformer: ViT-L/32 模型实例
     """
     model = VisionTransformer(img_size=224,
                               patch_size=32,
@@ -374,11 +452,17 @@ def vit_large_patch32_224_in21k(num_classes: int = 21843):
     return model
 
 
-def vit_huge_patch14_224_in21k(num_classes: int = 21843):
+def vit_huge_patch14_224_in21k(num_classes: int = 21843) -> VisionTransformer:
     """
     ViT-Huge model (ViT-H/14) from original paper (https://arxiv.org/abs/2010.11929).
     ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
     NOTE: converted weights not currently available, too large for github release hosting.
+
+    Args:
+        num_classes: 分类头输出类别数 K
+
+    Returns:
+        VisionTransformer: ViT-H/14 模型实例
     """
     model = VisionTransformer(img_size=224,
                               patch_size=14,

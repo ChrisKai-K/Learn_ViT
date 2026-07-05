@@ -2,7 +2,7 @@
 import os
 import json
 import argparse
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 from PIL import Image, ImageDraw, ImageFont
@@ -19,11 +19,30 @@ STD  = (0.5, 0.5, 0.5)
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".JPG", ".JPEG", ".PNG", ".BMP", ".WEBP"}
 
 def is_image_file(p: str) -> bool:
+    """判断给定路径是否为受支持的图片文件（依据后缀名）。
+
+    Args:
+        p: 文件路径字符串
+
+    Returns:
+        bool: 后缀在 IMG_EXTS 集合中返回 True，否则 False
+    """
     return os.path.splitext(p)[-1] in IMG_EXTS
 
 
 def collect_images(input_path: str) -> List[str]:
-    """支持：单张图片 / 文件夹（递归）"""
+    """收集要推理的图片路径列表，支持：单张图片 / 文件夹（递归）。
+
+    Args:
+        input_path: 单张图片路径或文件夹路径
+
+    Returns:
+        List[str]: 排序后的图片路径列表
+
+    Raises:
+        FileNotFoundError: 输入路径不存在
+        ValueError: 输入是非图片文件，或文件夹下未找到任何图片
+    """
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"input path not found: {input_path}")
 
@@ -47,11 +66,17 @@ def collect_images(input_path: str) -> List[str]:
 
 def load_class_indices(json_path: str) -> Optional[Dict[int, str]]:
     """
+    读取 class_indices.json，返回 {类别id: 类别名} 的映射。
+
     class_indices.json 格式通常是：
       {"0":"daisy", "1":"roses", ...}
-    返回：
-      {0:"daisy", 1:"roses", ...}
-    若 json_path 为空或不存在 -> None
+
+    Args:
+        json_path: class_indices.json 文件路径
+
+    Returns:
+        Optional[Dict[int, str]]: {0:"daisy", 1:"roses", ...}
+        若 json_path 为空或不存在 -> None
     """
     if not json_path:
         return None
@@ -73,12 +98,18 @@ def load_class_indices(json_path: str) -> Optional[Dict[int, str]]:
 
 def load_checkpoint(weights_path: str, device: torch.device) -> Tuple[Dict, Dict]:
     """
-    返回：
-      state_dict: 纯模型参数 dict
-      raw_ckpt:   原始 ckpt（可能包含 epoch/optimizer_state/args 等）
-    兼容两种保存格式：
+    加载权重文件，兼容两种保存格式：
     1) 纯 state_dict：直接是参数字典
     2) checkpoint：dict 里包含 model_state 或 state_dict
+
+    Args:
+        weights_path: 权重文件路径
+        device: 加载时映射到的设备
+
+    Returns:
+        Tuple[Dict, Dict]:
+          - state_dict: 纯模型参数 dict
+          - raw_ckpt:   原始 ckpt（可能包含 epoch/optimizer_state/args 等）
     """
     ckpt = torch.load(weights_path, map_location=device)
     if isinstance(ckpt, dict) and "model_state" in ckpt:
@@ -90,15 +121,32 @@ def load_checkpoint(weights_path: str, device: torch.device) -> Tuple[Dict, Dict
 
 
 def infer_num_classes_from_state_dict(state_dict: Dict) -> Optional[int]:
-    """尽量从 head.weight 推断类别数 K"""
+    """尽量从 head.weight 推断类别数 K。
+
+    Args:
+        state_dict: 模型参数字典
+
+    Returns:
+        Optional[int]: 推断到的类别数 K；若 head.weight 不存在或维度不符则返回 None
+    """
     w = state_dict.get("head.weight", None)
     if isinstance(w, torch.Tensor) and w.ndim == 2:
         return int(w.shape[0])
     return None
 
 
-def get_model_factory(model_name: str):
-    """根据字符串拿到 vit_model.py 里的工厂函数"""
+def get_model_factory(model_name: str) -> Callable[..., "torch.nn.Module"]:
+    """根据字符串拿到 vit_model.py 里的工厂函数。
+
+    Args:
+        model_name: 模型工厂函数名（如 vit_base_patch16_224_in21k）
+
+    Returns:
+        Callable[..., nn.Module]: 对应的工厂函数，调用后返回一个 ViT 模型实例
+
+    Raises:
+        ValueError: model_name 不存在或不是可调用对象
+    """
     if not hasattr(vit_models, model_name):
         candidates = [n for n in dir(vit_models) if n.startswith("vit_")]
         raise ValueError(f"Unknown model_name='{model_name}'. Example candidates: {candidates[:15]} ...")
@@ -108,8 +156,13 @@ def get_model_factory(model_name: str):
     return fn
 
 
-def build_val_transform():
-    """固定输入尺寸为 IMG_SIZE，保证与 PatchEmbed 的 assert 对齐"""
+def build_val_transform() -> transforms.Compose:
+    """构建验证/推理阶段的数据预处理流水线。
+
+    Returns:
+        transforms.Compose: Resize -> CenterCrop -> ToTensor -> Normalize 的组合
+        固定输入尺寸为 IMG_SIZE，保证与 PatchEmbed 的 assert 对齐
+    """
     resize_size = int(IMG_SIZE / 224 * 256)  # 224 -> 256
     return transforms.Compose([
         transforms.Resize(resize_size),
@@ -121,8 +174,16 @@ def build_val_transform():
 
 def _is_allowed_mismatch_key(k: str) -> bool:
     """
+    判断某个 key 是否属于“允许忽略”的不匹配项。
+
     这里定义“允许忽略”的 key（比如某些 checkpoint 可能带额外字段，但我们已经做了 model_state 提取）
     目前保守：不额外放行。
+
+    Args:
+        k: state_dict 中的参数名
+
+    Returns:
+        bool: 是否允许忽略，目前恒为 False
     """
     return False
 
@@ -136,6 +197,17 @@ def safe_load_state_dict(
     安全加载：
     - 默认：要求权重与模型结构严格匹配（shape / key 都匹配），否则报错，防止选错模型版本
     - allow_partial=True：只加载 shape 匹配的部分，并打印跳过信息（不建议用于正式推理）
+
+    Args:
+        model: 待加载权重的模型
+        state_dict: 权重参数字典
+        allow_partial: 是否允许部分加载（只加载 shape 匹配的部分）
+
+    Returns:
+        None: 函数无返回值，直接修改 model 的参数
+
+    Raises:
+        RuntimeError: 默认严格模式下，出现 unexpected/missing/mismatched 时抛出
     """
     model_sd = model.state_dict()
 
@@ -202,7 +274,20 @@ def safe_load_state_dict(
 
 
 @torch.no_grad()
-def predict_one(model, img_pil: Image.Image, tfm, device: torch.device):
+def predict_one(model, img_pil: Image.Image, tfm, device: torch.device) -> Tuple[int, float]:
+    """对单张图片进行推理，返回预测类别 id 与置信度。
+
+    Args:
+        model: 已加载权重并处于 eval 模式的模型
+        img_pil: PIL.Image 输入图像
+        tfm: 验证/推理用的 transforms 流水线
+        device: 推理设备
+
+    Returns:
+        Tuple[int, float]:
+          - pred_idx: 预测类别 id（argmax 得到）
+          - pred_prob: 该类别的 softmax 置信度（0~1）
+    """
     model.eval()
     img = img_pil.convert("RGB")
     x = tfm(img).unsqueeze(0).to(device)      # [1,3,224,224]
@@ -214,7 +299,15 @@ def predict_one(model, img_pil: Image.Image, tfm, device: torch.device):
 
 
 def draw_text_on_image(img: Image.Image, text: str) -> Image.Image:
-    """把预测结果写到图上"""
+    """把预测结果文字写到图片左上角（带黑底白字），返回新图片。
+
+    Args:
+        img: 原始 PIL 图像
+        text: 要写上去的文字（如类别名+概率）
+
+    Returns:
+        Image.Image: 绘制好文字的 RGB 图像
+    """
     img = img.convert("RGB")
     draw = ImageDraw.Draw(img)
     try:
@@ -231,7 +324,15 @@ def draw_text_on_image(img: Image.Image, text: str) -> Image.Image:
     return img
 
 
-def main(args):
+def main(args) -> None:
+    """推理主流程：设备选择 -> 收集图片 -> 加载类别表/权重 -> 构建模型 -> 逐张预测并保存结果。
+
+    Args:
+        args: 命令行解析得到的 Namespace 对象，包含 data/weights/model_name 等字段
+
+    Returns:
+        None: 函数无返回值，结果写入 exp_folder 下的 predictions.txt（以及可选的标注图）
+    """
     # 1) device
     device = torch.device(args.device if torch.cuda.is_available() and "cuda" in args.device else "cpu")
 
