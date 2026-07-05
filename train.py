@@ -286,7 +286,7 @@ def main(args) -> None:
     # 构建优化器：只优化requires_grad=True的参数
     pg = [p for p in model.parameters() if p.requires_grad]
     optimizer = optim.SGD(pg, lr=args.lr, momentum=0.9, weight_decay=5E-5)
-    # 学习率调度器：余弦退火（Cosine LR）
+    # 学习率调度器：余弦退火（Cosine LR）@cosine_annealing.png
     lf = lambda x: ((1 + math.cos(x * math.pi / args.epochs)) / 2) * (1 - args.lrf) + args.lrf
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
 
